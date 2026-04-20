@@ -113,8 +113,13 @@ class Config:
     OUTPUT_FILE = f"CTP_PCR_Curing_MILP_v1_PlanSchedule_Feb_{PLAN_DATE.date()}_28Days.xlsx"
 
     # ── MILP solver options ───────────────────────────────────────────────────
-    MILP_TIME_LIMIT_SEC = 300        # hard wall-clock cap passed to HiGHS
-    MILP_REL_GAP        = 0.01       # accept solutions within 1% of optimum
+    # HiGHS (open-source) MIP is slower than Gurobi/CPLEX on ~1000 binaries.
+    # In practice HiGHS finds a strong incumbent within seconds but then
+    # spends minutes trying to *prove* optimality. We tune for "good
+    # incumbent fast" rather than "provably optimal".
+    MILP_TIME_LIMIT_SEC = 600        # hard wall-clock cap passed to HiGHS
+    MILP_REL_GAP        = 0.05       # accept solutions within 5% of LP bound
+    MILP_MIN_MACHINE_CT = 30         # prune machines whose eff_cap < this*min_ct
 
     @classmethod
     def avail_mins(cls) -> float:
@@ -679,16 +684,29 @@ class MILP_Solver:
         ub = np.full(n_vars, np.inf)
         integrality = np.zeros(n_vars, dtype=int)
 
-        # per-pair upper bound on cycles = floor(eff_cap[m] / ct[s])
+        # per-pair upper bound on cycles — tightening BigM improves LP bound
+        #   capacity-derived : floor(eff_cap[m] / ct[s])
+        #   demand-derived   : ceil(Demand[s] / CAVITIES)   (no point producing
+        #                      more than demand of this SKU)
+        # The min of these gives the tightest valid BigM, which in turn gives
+        # a tighter LP relaxation and much faster branch-and-bound.
         bigM = np.zeros(P)
+        cav_int = Config.CAVITIES_PER_MOULD
         for p, (si, mi) in enumerate(pair_list):
-            ct = sku_rows[si].CycleTime_min
+            row = sku_rows[si]
+            ct = row.CycleTime_min
             cap_m = eff_cap[all_machines[mi]]
-            bigM[p] = max(1, int(cap_m / ct)) if ct > 0 else 0
+            cap_cycles = int(cap_m / ct) if ct > 0 else 0
+            dem_cycles = int(math.ceil(float(row.Demand) / cav_int))
+            bigM[p] = max(1, min(cap_cycles, dem_cycles))
             ub[p] = bigM[p]                    # c[p] in [0, BigM]
             ub[P + p] = 1.0                    # y[p] in {0, 1}
             integrality[p] = 1                 # cycles integer
             integrality[P + p] = 1             # y binary (ub=1 enforces)
+
+        # slack upper bound = Demand[s] (can't miss more than full demand)
+        for si, row in enumerate(sku_rows):
+            ub[2 * P + si] = float(row.Demand)
 
         # slack[s] is continuous >= 0 (integrality already 0)
 
@@ -750,12 +768,21 @@ class MILP_Solver:
             bounds=Bounds(lb, ub),
             options=options,
         )
-        if not result.success or result.x is None:
-            raise RuntimeError(f"MILP did not converge: {result.message}")
+
+        # HiGHS returns success=False on time-limit even when it has a good
+        # incumbent. We only fail if there is no feasible solution at all
+        # (result.x is None). A time-limited incumbent is still usable — it
+        # just may not be provably optimal.
+        if result.x is None:
+            raise RuntimeError(f"MILP found no feasible solution: {result.message}")
+        if not result.success:
+            first_line = result.message.strip().splitlines()[0]
+            print(f"  [MILP] WARNING: {first_line} - using best incumbent found")
 
         unmet_units = float(np.sum(result.x[2 * P : 2 * P + S]))
         active_pairs = int(round(float(np.sum(result.x[P : 2 * P]))))
-        print(f"  [MILP] status={result.message.strip().splitlines()[0]} | "
+        status_line  = result.message.strip().splitlines()[0]
+        print(f"  [MILP] status={status_line} | "
               f"Unmet units: {unmet_units:,.0f} | Active pairs: {active_pairs}")
 
         meta = {
