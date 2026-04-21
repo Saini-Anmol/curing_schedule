@@ -119,7 +119,16 @@ class Config:
     # incumbent fast" rather than "provably optimal".
     MILP_TIME_LIMIT_SEC = 600        # hard wall-clock cap passed to HiGHS
     MILP_REL_GAP        = 0.05       # accept solutions within 5% of LP bound
-    MILP_MIN_MACHINE_CT = 30         # prune machines whose eff_cap < this*min_ct
+    MILP_SHOW_PROGRESS  = True       # stream HiGHS MIP progress to stdout
+
+    # Biggest lever: cap how many presses each SKU can go on in the MILP.
+    # The SKU eligibility list from the allowable matrix is often 20-30+
+    # machines, which blows the binary count up to ~1000 and makes HiGHS
+    # branch-and-bound extremely slow. In practice each SKU only needs a
+    # handful of presses, so we keep only the top-K by fit score
+    # (score = eff_cap[m] / ct[s] = max producible cycles).
+    # Set to 0 to disable the filter (use every eligible machine).
+    MILP_TOP_K_PRESSES_PER_SKU = 8
 
     @classmethod
     def avail_mins(cls) -> float:
@@ -649,11 +658,18 @@ class MILP_Solver:
             eff_cap[m] = max(0.0, self.avail_mins - locked.get(str(m), 0.0))
 
         # ── build eligible (s, m) pair list — drops the huge Cartesian grid ──
-        # Only pairs that pass both machine-allowable AND mould-availability
-        # filters become variables. For typical PCR inputs this drops the
-        # variable count by ~10x vs. the LP formulation.
+        # Only pairs that pass three filters become variables:
+        #   (a) machine-allowable matrix,
+        #   (b) mould availability (MouldTracker),
+        #   (c) top-K per SKU by fit score (eff_cap[m] / ct[s]).
+        # Filter (c) is the biggest speedup — it keeps each SKU to its
+        # ~K most productive presses instead of 20-30, shrinking the binary
+        # variable count by roughly 4-6x and making HiGHS branch-and-bound
+        # tractable within the time limit.
+        top_k = int(Config.MILP_TOP_K_PRESSES_PER_SKU)
         pair_list: list[tuple[int, int]] = []
         pair_idx:  dict[tuple[int, int], int] = {}
+        total_elig_before_k = 0
         for si, row in enumerate(sku_rows):
             elig_machines = set(str(m) for m in row.Machines)
             mould_elig = set(
@@ -663,10 +679,26 @@ class MILP_Solver:
                 )
             )
             elig = elig_machines & mould_elig
+            ct = row.CycleTime_min
+            if ct <= 0:
+                continue
+
+            # (mi, fit) pairs for machines that pass (a) AND (b) AND have capacity
+            scored: list[tuple[int, float]] = []
             for mi, mach in enumerate(all_machines):
-                if str(mach) in elig and eff_cap[mach] >= row.CycleTime_min:
-                    pair_idx[(si, mi)] = len(pair_list)
-                    pair_list.append((si, mi))
+                if str(mach) in elig and eff_cap[mach] >= ct:
+                    fit = eff_cap[mach] / ct           # max producible cycles
+                    scored.append((mi, fit))
+            total_elig_before_k += len(scored)
+
+            # Filter (c): keep only the top-K machines for this SKU
+            if top_k > 0 and len(scored) > top_k:
+                scored.sort(key=lambda t: -t[1])
+                scored = scored[:top_k]
+
+            for mi, _ in scored:
+                pair_idx[(si, mi)] = len(pair_list)
+                pair_list.append((si, mi))
 
         P = len(pair_list)                 # number of eligible pairs
         if P == 0:
@@ -753,13 +785,17 @@ class MILP_Solver:
 
         print(f"  [MILP] {n_vars:,} vars ({P} cycle + {P} binary + {S} slack) | "
               f"{len(b_ub):,} constraints | eps: {self.penalty}")
+        print(f"  [MILP] Pairs after top-{top_k} filter: {P} "
+              f"(was {total_elig_before_k} before filter)")
         print(f"  [MILP] Eff capacity range: "
               f"{min(eff_cap.values()):,.0f}-{max(eff_cap.values()):,.0f} min/press")
+        print(f"  [MILP] Solving (time limit {Config.MILP_TIME_LIMIT_SEC}s, "
+              f"gap tol {Config.MILP_REL_GAP*100:.1f}%) — streaming HiGHS log:")
 
         options = {
             "time_limit": Config.MILP_TIME_LIMIT_SEC,
             "mip_rel_gap": Config.MILP_REL_GAP,
-            "disp": False,
+            "disp": bool(Config.MILP_SHOW_PROGRESS),
         }
         result = milp(
             c=c_obj,
