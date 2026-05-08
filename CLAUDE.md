@@ -12,17 +12,22 @@ Currently scopes **PCR** (Passenger Car Radial). Companion TBR file exists on `m
 
 ---
 
-## 2. Three algorithm branches
+## 2. Three algorithms (consolidated on `main`)
 
-The same problem is solved with three different optimisation approaches, each on its own branch. **Main branch is LP**; the other two are isolated experiments.
+The same problem is solved with three different optimisation approaches. As of
+the 2026 V1 restructure, **all three live on `main` inside the `V1/` package**;
+the legacy branches `MILP_approach` and `CP_SAT_approach` retain the original
+single-file monoliths for reference but have not been ported.
 
-| Branch | Solver | Main file (PCR) | Status |
+| Algorithm | Solver | Entry point | Status |
 |---|---|---|---|
-| `main` | LP + post-rounding (HiGHS via `scipy.optimize.linprog`) | [`btp/Curing/V1 11-37-56-875/jk_curing_lp_PCR.py`](btp/Curing/V1%2011-37-56-875/jk_curing_lp_PCR.py) | Original baseline |
-| `MILP_approach` | MILP (HiGHS via `scipy.optimize.milp`) | `btp/Curing/V1 11-37-56-875/jk_curing_milp_PCR.py` | Drop-in replacement, no rounding loss |
-| `CP_SAT_approach` | CP-SAT (Google OR-Tools) | `btp/Curing/V1 11-37-56-875/jk_curing_cpsat_PCR.py` | Fastest in practice, parallel search |
+| LP + post-rounding | HiGHS via `scipy.optimize.linprog` | `python -m V1.main --algo lp` (default) | Original baseline |
+| MILP | HiGHS via `scipy.optimize.milp` | `python -m V1.main --algo milp` | Drop-in replacement, no rounding loss |
+| CP-SAT | Google OR-Tools | `python -m V1.main --algo cpsat` | Fastest in practice, parallel search |
 
 **All three produce the same 5-sheet Excel output** — only the algorithm differs.
+
+The legacy single-file versions (`jk_curing_milp_PCR.py`, `jk_curing_cpsat_PCR.py`) still exist on the `MILP_approach` and `CP_SAT_approach` branches respectively; they are not maintained against the V1 layout.
 
 For deep-dive technical documentation:
 - [`docs/LP_approach.md`](docs/LP_approach.md)
@@ -132,18 +137,31 @@ KPI banner on every sheet: Demand, Planned, Gap, Fulfilment %, Avg Util %, Chang
 
 ## 9. How to run
 
-**Critical:** scripts use *relative paths* for input CSVs/XLSX, so always `cd` into the script's folder first:
+All three PCR algorithms dispatch through a single CLI in the V1 package. Run from the repo root:
 
 ```bash
-cd "btp/Curing/V1 11-37-56-875"
-python3 jk_curing_lp_PCR.py        # LP (main)
-# or
-python3 jk_curing_milp_PCR.py      # MILP (after git checkout MILP_approach)
-# or
-python3 jk_curing_cpsat_PCR.py     # CP-SAT (after git checkout CP_SAT_approach)
+python3 -m V1.main                              # default: --algo lp
+python3 -m V1.main --algo lp                    # LP + post-rounding
+python3 -m V1.main --algo milp                  # MILP (HiGHS)
+python3 -m V1.main --algo cpsat                 # CP-SAT (OR-Tools, parallel)
+python3 V1/jk_curing_lp_TBR.py                  # TBR (sibling monolith — LP only, deferred)
 ```
 
-Each script's `if __name__ == "__main__"` calls `run_from_database(...)` by default — connects to MySQL using credentials in `Config`. To run offline, swap to the commented-out `run_from_excel(...)` block and point at `load_*.xlsx`.
+By default each algorithm uses `run_from_database` (connects to MySQL using credentials in `Config`). To run offline against the input/load_*.xlsx snapshots:
+
+```bash
+python3 -m V1.main --algo milp --source excel
+```
+
+Override input/output locations via env vars (paths default to `<repo>/input` and `<repo>/output`):
+
+```bash
+INPUT_DIR=/data/in OUTPUT_DIR=/data/out python3 -m V1.main --algo cpsat
+```
+
+The output filename is derived per-algorithm from `Config.output_file_for(algo)` and lands under `OUTPUT_DIR/CTP_PCR_Curing_<TAG>_PlanSchedule_<Month>_<YYYY-MM-DD>_<N>Days.xlsx`.
+
+The legacy single-file MILP/CP-SAT scripts still exist on the `MILP_approach` and `CP_SAT_approach` branches but have not been ported to V1.
 
 ---
 
@@ -165,7 +183,7 @@ On macOS the user runs `pip3` (not `pip`); user-installed binaries land in `~/Li
 
 ## 11. Configuration
 
-All knobs are in the `Config` class at the top of each scheduler file. Common ones:
+All knobs live in the single `Config` class in [`V1/config/settings.py`](V1/config/settings.py). Common ones:
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -195,17 +213,54 @@ CP-SAT-only:
 
 ## 12. Repo structure
 
+**Main branch** — single modular package hosting all three PCR algorithms:
+
 ```
 .
-├── btp/Curing/V1 11-37-56-875/   ← code lives here (all branches)
-│   ├── jk_curing_lp_PCR.py        (main branch only — but file structure same on all)
-│   ├── jk_curing_lp_TBR.py        (main only — TBR variant)
-│   ├── jk_curing_milp_PCR.py      (MILP_approach only)
-│   ├── jk_curing_cpsat_PCR.py     (CP_SAT_approach only)
-│   ├── load_*.xlsx                (snapshots for offline runs)
-│   ├── Feb_/Mar_*.csv             (demand inputs)
-│   ├── daily running moulds_*.csv (continuity input)
-│   └── CTP_*_PlanSchedule_*.xlsx  (generated outputs)
+├── V1/                            ← consolidated source (LP + MILP + CP-SAT)
+│   ├── __init__.py
+│   ├── main.py                    (CLI dispatcher: `python -m V1.main --algo {lp,milp,cpsat}`
+│   │                               + JK_LP_Curing_Scheduler_v2 base
+│   │                               + JK_MILP_Curing_Scheduler_v1
+│   │                               + JK_CPSAT_Curing_Scheduler_v1)
+│   ├── config/
+│   │   └── settings.py            (Config: knobs incl. MILP_/CPSAT_ options,
+│   │                               paths, env-var overrides, ALGO_LABEL,
+│   │                               output_file_for(algo) helper)
+│   ├── setups/
+│   │   ├── etl.py                 (DB + Excel loaders — shared by all algos)
+│   │   └── mould_tracker.py       (mould availability ledger — shared)
+│   ├── solvers/
+│   │   ├── lp_solver.py           (LP_Solver — scipy.linprog)
+│   │   ├── rounder.py             (Rounder — LP-only float→int + top-up)
+│   │   ├── milp_solver.py         (MILP_Solver — scipy.optimize.milp / HiGHS)
+│   │   ├── milp_extractor.py      (MILP_Extractor — no rounding)
+│   │   ├── cpsat_solver.py        (CPSAT_Solver — OR-Tools CP-SAT)
+│   │   └── cpsat_extractor.py     (CPSAT_Extractor — no rounding)
+│   ├── reports/
+│   │   ├── schedule_builder.py    (ScheduleBuilder — shift timeline; algo_label
+│   │   │                            param drives Remarks string)
+│   │   └── excel_exporter.py      (ExcelExporter — 5-sheet workbook; algo_label
+│   │                                drives sheet title strings)
+│   ├── routes/
+│   │   ├── run_from_database.py   (DB-backed entry; takes algo= arg)
+│   │   └── run_from_excel.py      (offline / Excel entry; takes algo= arg)
+│   ├── utilities/
+│   │   └── shifts.py              (_get_shift_fn, con_split_into_shifts)
+│   └── jk_curing_lp_TBR.py        (TBR sibling monolith — same algorithm,
+│                                    different SQL tables / Config constants)
+├── input/                         ← all input data
+│   ├── Feb_*.csv  Mar_*.csv  May_*.csv     (demand inputs)
+│   ├── Requirement(*).csv                  (legacy demand inputs)
+│   ├── daily running moulds_feb.csv        (continuity reference)
+│   ├── load_*.xlsx                         (DB snapshots written by ETL)
+│   └── work.ipynb                          (scratch notebook)
+├── output/                        ← all generated reports
+│   ├── CTP_*_PlanSchedule_*.xlsx           (final 5-sheet workbook per algo)
+│   └── df_shiftv1.xlsx                     (debug dump from orchestrator)
+├── btp/Curing/V1/                 ← legacy directory; PCR sources now live in V1/
+│                                    (MILP/CP-SAT still on their own branches as
+│                                    legacy single-file experiments)
 ├── docs/
 │   ├── README.md                  (index + comparison)
 │   ├── LP_approach.md             (full LP doc)
@@ -215,14 +270,26 @@ CP-SAT-only:
 └── CLAUDE.md                      (this file)
 ```
 
+**`MILP_approach` and `CP_SAT_approach` branches** still hold the original
+single-file monoliths (`jk_curing_milp_PCR.py`, `jk_curing_cpsat_PCR.py`)
+under `btp/Curing/V1 11-37-56-875/` — they are kept for reference and have
+*not* been restructured. New work should happen on `main` against the V1
+layout.
+
+Path resolution: `Config.INPUT_DIR` and `Config.OUTPUT_DIR` resolve to
+`<repo-root>/input` and `<repo-root>/output` by default; override via the
+`INPUT_DIR` / `OUTPUT_DIR` env vars.
+
 ---
 
 ## 13. Working conventions
 
-- **Don't put MILP/CP-SAT code on `main`** — keep them isolated on their own branches.
+- **Main now hosts all three PCR algorithms** in a single `V1/` package. The legacy `MILP_approach` and `CP_SAT_approach` branches are kept as monolith experiments for historical reference but should not receive new work.
 - The LP `Rounder` is heuristic (3 passes). MILP/CP-SAT replace it with a tiny `Extractor` that just reads integer values out of the solution. Don't reintroduce rounding logic to the latter two.
-- **Folder name has a space**: `V1 11-37-56-875`. Always quote it in shell: `cd "V1 11-37-56-875"`. Tab-completion handles this automatically.
-- The `df_shiftv1.xlsx` debug dump is written by the orchestrator (`scheduler.run()` line ~1470 in each variant); harmless, just a side-effect.
+- Algorithm dispatch is via `python -m V1.main --algo {lp,milp,cpsat}` from the repo root. Default is `lp`. Inputs live in `input/`, outputs in `output/` (override via `INPUT_DIR` / `OUTPUT_DIR` env vars).
+- The `JK_LP_Curing_Scheduler_v2` class is the parametric base; `JK_MILP_Curing_Scheduler_v1` and `JK_CPSAT_Curing_Scheduler_v1` subclass it and override only the solver/extractor build hooks plus banner strings. Phases 1, 2, 5 are shared across all three.
+- `ScheduleBuilder(plan_start, algo_label=...)` and `ExcelExporter(path, algo_label=...)` accept an algo label; defaults to `"LP"` for back-compat. The label drives the production-row Remarks string and the four sheet title strings, matching the legacy monolith outputs byte-for-byte.
+- The `df_shiftv1.xlsx` debug dump is written by the orchestrator (`scheduler.run()` in each variant) into `output/`; harmless, just a side-effect.
 
 ---
 
@@ -239,4 +306,4 @@ CP-SAT-only:
 
 - Full per-approach docs: [`docs/`](docs/)
 - Top-level README: [`README.md`](README.md)
-- Existing scheduler outputs: `btp/Curing/V1 11-37-56-875/CTP_*_PlanSchedule_*.xlsx`
+- Existing scheduler outputs: `output/CTP_*_PlanSchedule_*.xlsx`

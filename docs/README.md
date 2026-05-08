@@ -1,6 +1,17 @@
 # Curing Schedule — Documentation
 
-Technical documentation for the three scheduler approaches in this repo.
+Project documentation for the JK Tyre BTP PCR curing scheduler. Two layers:
+
+### Layer 1 — Product & technical specification
+Read these first to understand *what* the system does and *how* it's
+designed.
+
+| Document | Purpose |
+|---|---|
+| [**PRD.md**](PRD.md) | Product Requirements — objectives, scope, stakeholders, use cases, KPIs, constraints |
+| [**TRD.md**](TRD.md) | Technical Requirements — architecture, data model, algorithm specs, module structure, performance targets |
+
+### Layer 2 — Per-algorithm deep-dives
 
 | Document | Branch | Approach |
 |---|---|---|
@@ -8,22 +19,23 @@ Technical documentation for the three scheduler approaches in this repo.
 | [**MILP_approach.md**](MILP_approach.md) | `MILP_approach` | Mixed-Integer LP (HiGHS via `scipy.optimize.milp`) |
 | [**CPSAT_approach.md**](CPSAT_approach.md) | `CP_SAT_approach` | Constraint Programming (Google OR-Tools CP-SAT) |
 
-All three solvers produce the **same 5-sheet Excel output**, so you can
-visualise any of them with the same dashboard —
-see [`../dashboard/README.md`](../dashboard/README.md).
+All three solvers produce the **same 5-sheet Excel output** — only the
+algorithm differs.
 
 ---
 
 ## Reading order
 
-If you're new to the project, read in this order:
+If you're new to the project:
 
-1. [`LP_approach.md`](LP_approach.md) — describes the complete pipeline
-   (ETL, continuity, solver, rounding, schedule build, Excel export).
-2. [`MILP_approach.md`](MILP_approach.md) — focuses on the differences
-   vs LP, skipping the shared pipeline bits.
-3. [`CPSAT_approach.md`](CPSAT_approach.md) — same, focused on the
-   CP-SAT-specific changes.
+1. [`PRD.md`](PRD.md) — what the system does and why
+2. [`TRD.md`](TRD.md) — how it's built end-to-end
+3. [`LP_approach.md`](LP_approach.md) — full LP pipeline (the baseline)
+4. [`MILP_approach.md`](MILP_approach.md) — MILP, focused on the diff vs LP
+5. [`CPSAT_approach.md`](CPSAT_approach.md) — CP-SAT, focused on the diff vs MILP
+
+If you're an AI agent (Claude Code) onboarding to this repo, also read
+[`../CLAUDE.md`](../CLAUDE.md) — the concise project briefing.
 
 ---
 

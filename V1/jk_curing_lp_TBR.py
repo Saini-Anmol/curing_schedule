@@ -45,12 +45,20 @@ Addresses all 6 production constraints:
 
 import ast
 import math
+import os
 import warnings
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# ── path resolution ──────────────────────────────────────────────────────────
+# This file lives at <repo-root>/V1/jk_curing_lp_TBR.py — repo root is parent.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_INPUT_DIR  = Path(os.environ.get("INPUT_DIR",  str(_REPO_ROOT / "input")))
+_OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(_REPO_ROOT / "output")))
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -99,7 +107,9 @@ class Config:
     PLAN_DATE = datetime(2026, 2, 1, 7, 0, 0)
     # ── output ────────────────────────────────────────────────────────────────
     TYRE_TYPE   = "tbr"
-    OUTPUT_FILE = f"CTP_TBR_Curing_LP_v4_PlanSchedule_Feb_{PLAN_DATE.date()}_28Days.xlsx"
+    OUTPUT_FILE = str(
+        _OUTPUT_DIR / f"CTP_TBR_Curing_LP_v4_PlanSchedule_Feb_{PLAN_DATE.date()}_28Days.xlsx"
+    )
 
     @classmethod
     def avail_mins(cls) -> float:
@@ -274,7 +284,7 @@ class ETL:
                 .reset_index())
 
         df = df[df["Quantity"] > 0].copy()
-        df.to_excel("load_demand.xlsx", index=False)
+        df.to_excel(str(_INPUT_DIR / "load_demand.xlsx"), index=False)
         return df
 
     def load_cycle_times(self) -> pd.DataFrame:
@@ -288,7 +298,7 @@ class ETL:
         df = df[["SKUCode","CycleTime_min"]].drop_duplicates("SKUCode")
         df['SKUCode'] = df['SKUCode'].str.strip()
 
-        df.to_excel("load_cycle_times.xlsx", index=False)
+        df.to_excel(str(_INPUT_DIR / "load_cycle_times.xlsx"), index=False)
         return df
 
     def load_machine_allowable(self) -> pd.DataFrame:
@@ -306,7 +316,7 @@ class ETL:
         #df['Machines'] = df['Machines'].apply(lambda x: [int(i) for i in ast.literal_eval(x)])
         df['Machines'] = df['Machines'].apply(lambda lst: list(map(int, lst)))
               
-        df.to_excel("load_machine_allowable.xlsx", index=False)
+        df.to_excel(str(_INPUT_DIR / "load_machine_allowable.xlsx"), index=False)
         return df
 
     def load_gt_inventory(self) -> pd.DataFrame:
@@ -315,7 +325,7 @@ class ETL:
             f" FROM {Config.DB_NAME}.gt_inventory_manual_tbr"
         )
 
-        df.to_excel("load_gt_inventory.xlsx", index=False)
+        df.to_excel(str(_INPUT_DIR / "load_gt_inventory.xlsx"), index=False)
         return df
 
     # def load_running_moulds(self) -> pd.DataFrame:
@@ -465,7 +475,7 @@ class ETL:
 
         grouped.columns = ["Machine", "SKUCode", "MouldNos", "MouldLife_remaining", "Num_Moulds"]
 
-        grouped.to_excel("load_running_moulds.xlsx", index=False)
+        grouped.to_excel(str(_INPUT_DIR / "load_running_moulds.xlsx"), index=False)
 
         return grouped[["Machine", "SKUCode", "MouldNos", "MouldLife_remaining", "Num_Moulds"]]
 
@@ -475,7 +485,7 @@ class ETL:
             "WHERE `Active Flag`=True"
         )
 
-        df.to_excel("load_mould_master.xlsx", index=False)
+        df.to_excel(str(_INPUT_DIR / "load_mould_master.xlsx"), index=False)
         return df
 
     # ── from Excel (offline / testing) ────────────────────────────────────────
@@ -1468,7 +1478,7 @@ class JK_LP_Curing_Scheduler_v2:
         print("\n[Phase 5] Building shift-wise schedule...")
         builder  = ScheduleBuilder(plan_start)
         df_shift = builder.build(df_mach, machine_sku_order, df_gt, continuity_rows)
-        df_shift.to_excel("df_shiftv1.xlsx", index=False)
+        df_shift.to_excel(str(_OUTPUT_DIR / "df_shiftv1.xlsx"), index=False)
 
         df_summary = self._build_summary(df_all, df_mach, df_shift)
         df_util    = self._build_util(df_mach, df_shift, all_machines)
@@ -1777,7 +1787,7 @@ def run_from_database(
 
 if __name__ == "__main__":
     results = run_from_database(
-        demand_csv = "Feb_CTP_TBR_Requirement.csv",
+        demand_csv = str(_INPUT_DIR / "Feb_CTP_TBR_Requirement.csv"),
         plan_start = Config.PLAN_DATE#datetime(2026, 3, 1, 7, 0, 0)
     )
 # ------- Excel Execution -------------------------------------------------------

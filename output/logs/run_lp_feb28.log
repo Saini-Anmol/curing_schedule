@@ -1,0 +1,51 @@
+
+[Phase 0] ETL from database...
+
+================================================================
+  JK Tyre PCR Curing LP Scheduler v2
+  Plan start  : 2026-02-01 07:00
+  Horizon     : 28 days (40,320 min/press)
+  Changeover  : 360 min | Max/shift: 3
+  Mould clean : 180 min every 12,000 units
+================================================================
+
+[Phase 1] Preparing SKU table...
+  [Prep] Schedulable: 51/57 | Machines: 90 | Demand: 392,645
+
+[Phase 2] Building continuity blocks...
+  [Cont] SKU 1325215813079TUNE5: group cap 9,484 < demand 13,636 -> 4,152 units to LP
+  [Cont] SKU 1325214617107MSXT0: group cap 5,376 < demand 9,849 -> 4,473 units to LP
+  [Cont] SKU 1225219Z15008SXC11: group cap 17,916 < demand 19,963 -> 2,047 units to LP
+  [Cont] SKU 1D25216814008QXPC0: group cap 12,096 < demand 13,003 -> 907 units to LP
+  [Cont] SKU 1325221417096HURL0: group cap 35,280 < demand 36,524 -> 1,244 units to LP
+  [Cont] SKU 1325225518111HRHB0: group cap 8,960 < demand 14,293 -> 5,333 units to LP
+  [Cont] SKU 1325219515091HURL2: group cap 21,504 < demand 22,541 -> 1,037 units to LP
+  [Cont] SKU 1325221318095HURL0: group cap 16,976 < demand 23,293 -> 6,317 units to LP
+  [Cont] 214 rows | Machines committed: 90 | Locked mins: 2,843,570 | SKUs with LP remainder: 8
+  [LP Input] 38 SKUs | Remaining demand: 81,364 units
+
+[Phase 3] Solving LP...
+  [LP] 3,458 vars | 128 constraints | Penalty weight: 0.01
+  [LP] Eff capacity range: 0–40,320 min/press
+  [LP] OPTIMAL | Unmet demand-mins: 100,325 (1672.1 hrs)
+
+[Phase 4] Rounding to integer cycles...
+  [Round] Rows: 106 | Units: 81,386 | Total CO time: 192.0 hrs | Changeovers: 32
+
+[Phase 5] Building shift-wise schedule...
+  [Build] Total rows: 7534 | Prod qty: 381,482 | Changeovers: 32 | Cleanings: 90
+
+================================================================
+  Total demand    :    394,027
+  Units planned   :    381,482  (96.8%)
+  Gap             :     12,545
+  Avg press util  : 96.258%
+  Changeover rows :         32
+  Mould clean rows:         90
+  Fully met SKUs  :         16
+  Partial SKUs    :         17
+  Unmet SKUs      :         18
+  Unschedulable   :          6
+================================================================
+
+  [Export] Saved → /Users/anmolsaini/Documents/jk-btp-lp-scheduler-main/output/CTP_PCR_Curing_LP_v4_PlanSchedule_Feb_2026-02-01_28Days.xlsx
